@@ -24,7 +24,9 @@ $app->register(new Silex\Provider\DoctrineServiceProvider(), array(
 
 $app->get('/messages/', function() use ($app) {
     $sql = "SELECT * FROM messages";
-    $post = $app['db']->fetchAssoc($sql);
+   	$messages = $app['db']->fetchAll($sql);
+    
+    return $app->json($messages);
 });
 
 $app->get('/messages/{id}', function(Silex\Application $app, $id) use ($app) {
@@ -34,7 +36,5 @@ $app->get('/messages/{id}', function(Silex\Application $app, $id) use ($app) {
 $app->post('/messages/', function() use ($app) {
 	return 'messages post';
 });
-
-
 
 $app->run();
