@@ -15,8 +15,16 @@ $app->before(function (Request $request) {
     }
 });
 
+$app->register(new Silex\Provider\DoctrineServiceProvider(), array(
+    'db.options' => array(
+        'driver'   => 'pdo_sqlite',
+        'path'     => __DIR__.'/db/messenger.sqlite',
+    ),
+));
+
 $app->get('/messages/', function() use ($app) {
-    return 'get messages';
+    $sql = "SELECT * FROM messages";
+    $post = $app['db']->fetchAssoc($sql);
 });
 
 $app->get('/messages/{id}', function(Silex\Application $app, $id) use ($app) {
