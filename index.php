@@ -29,16 +29,8 @@ $app->before(function (Request $request) {
 
 //Mount needed controllers
 $app->mount('/users', new Messenger\UserController());
+$app->mount('/users/{user_id}/messages', new Messenger\MessageController());
 
-//$app->get('/messages/', function () use ($app) {
-//    $sql = "SELECT * FROM messages";
-//
-//    $messages = $app['db']->fetchAll($sql);
-//
-//
-//    return $app->json(array());
-//});
-//
 $app->error(function (\Exception $e, $code) use ($app) {
     return $app->json(array("error" => $e->getMessage()), $code);
 });

@@ -6,7 +6,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 use Silex\Application;
 use Silex\ControllerProviderInterface;
 
-class UserController implements ControllerProviderInterface
+class MessageController implements ControllerProviderInterface
 {
     /**
      * @param Application $app
@@ -21,37 +21,37 @@ class UserController implements ControllerProviderInterface
 
         $factory->get(
             '/',
-            'Messenger\UserController::getAll'
+            'Messenger\MessageController::getAll'
         );
 
         $factory->get(
             '/{id}',
-            'Messenger\UserController::get'
+            'Messenger\MessageController::get'
         );
 
         $factory->post(
             '/',
-            'Messenger\UserController::create'
+            'Messenger\MessageController::create'
         );
 
         $factory->put(
             '/{id}',
-            'Messenger\UserController::update'
+            'Messenger\MessageController::update'
         );
 
         $factory->patch(
             '/{id}',
-            'Messenger\UserController::patch'
+            'Messenger\MessageController::patch'
         );
 
         $factory->options(
             '/',
-            'Messenger\UserController::options'
+            'Messenger\MessageController::options'
         );
 
         $factory->delete(
             '/{id}',
-            'Messenger\UserController::delete'
+            'Messenger\MessageController::delete'
         );
 
         return $factory;
@@ -59,39 +59,51 @@ class UserController implements ControllerProviderInterface
 
     /**
      * @param Application $app
+     * @param $user_id - User id
      * @return \Symfony\Component\HttpFoundation\JsonResponse
      */
-    public function getAll(Application $app)
+    public function getAll(Application $app, $user_id)
     {
-        $sql = "SELECT * FROM `users`";
-        $users = $app['db']->fetchAll($sql);
+        if (!$this->getUserById($user_id, $app)) {
+            return $app->json(array('status' => 'fail', 'errors' => 'Not found'), 404);
+        }
+        $sql = "SELECT * FROM `messages` WHERE `user_id`=?";
+        $message = $app['db']->fetchAll($sql, array($user_id));
 
-        return $app->json($users);
+        return $app->json($message);
     }
 
     /**
      * @param Application $app
-     * @param $id - user Id
+     * @param $user_id - User id
+     * @param $id - Message id
      * @return \Symfony\Component\HttpFoundation\JsonResponse
      */
-    public function get(Application $app, $id)
+    public function get(Application $app, $id, $user_id)
     {
-        $user = $this->getUserById($id, $app);
+        if (!$this->getUserById($user_id, $app)) {
+            return $app->json('Not found', 404);
+        }
+        $message = $this->getMessageByUserAndMessageId($user_id, $id, $app);
 
-        if (!$user) {
+        if (!$message) {
             return $app->json(array('status' => 'fail', 'errors' => 'Not found'), 404);
         }
 
-        return $app->json($user);
+        return $app->json($message);
     }
 
     /**
      * @param Application $app
      * @param Request $request
+     * @param $user_id - User id
      * @return \Symfony\Component\HttpFoundation\JsonResponse
      */
-    public function create(Application $app, Request $request)
+    public function create(Application $app, Request $request, $user_id)
     {
+        if (!$this->getUserById($user_id, $app)) {
+            return $app->json('Not found', 404);
+        }
         $errors = $this->validate($request->request->all(), $app);
 
         if (count($errors) > 0) {
@@ -103,38 +115,43 @@ class UserController implements ControllerProviderInterface
 
             return $app->json(array('response' => 'fail', 'errors' => $errorsArray), 400);
         }
-        $insertUsersQuery = "INSERT INTO `users`(`name`,`email`,`password`) VALUES(?,?,?)";
+        $insertMessageQuery = "INSERT INTO `messages`(`title`,`body`,`user_id`) VALUES(?,?,?)";
 
-        $addUserResult = $app['db']->executeUpdate($insertUsersQuery, array(
-            $request->request->get("name"),
-            $request->request->get("email"),
-            $request->request->get("password"),
+        $addMessageResult = $app['db']->executeUpdate($insertMessageQuery, array(
+            $request->request->get("title"),
+            $request->request->get("body"),
+            $user_id
         ));
 
-        if (!$addUserResult) {
+        if (!$addMessageResult) {
             return $app->json(array('response' => 'fail', 'errors' => 'Conflict'), 409);
         }
-        $userId = $app['db']->lastInsertId();
+        $messageId = $app['db']->lastInsertId();
 
         return $app->json(
             array('status' => 'success', 'errors' => ''),
             201,
-            array('Location' => $request->getUri() . $userId)
+            array('Location' => $request->getUri() . $messageId)
         );
     }
 
     /**
      * @param Application $app
      * @param Request $request
-     * @param $id
+     * @param $id - Message id
+     * @param $user_id - User id
      * @param bool|false $ignoreBlank - ignoring empty field validation to realize patch request
      * @return \Symfony\Component\HttpFoundation\JsonResponse
      */
-    public function update(Application $app, Request $request, $id, $ignoreBlank = false)
+    public function update(Application $app, Request $request, $id, $user_id, $ignoreBlank = false)
     {
-        $user = $this->getUserById($id, $app);
+        if (!$this->getUserById($user_id, $app)) {
+            return $app->json('Not found', 404);
+        }
 
-        if (!$user) {
+        $message = $this->getMessageByUserAndMessageId($user_id, $id, $app);
+
+        if (!$message) {
             return $app->json(array('status' => 'fail', 'errors' => 'Not found'), 404);
         }
         $errors = $this->validate($request->request->all(), $app, $ignoreBlank);
@@ -150,12 +167,11 @@ class UserController implements ControllerProviderInterface
         }
 
         //If some fields are empty(for example in patch request), query doesn't change them
-        $updateUsersQuery = "UPDATE `users` SET `name`=coalesce(?, `name`),`email`=coalesce(?, `email`),`password`=coalesce(?, `password`) WHERE id=?";
+        $updateMessageQuery = "UPDATE `messages` SET `title`=coalesce(?, `title`),`body`=coalesce(?, `body`) WHERE id=?";
 
-        $updateResult = $app['db']->executeUpdate($updateUsersQuery, array(
-            $request->request->get("name"),
-            $request->request->get("email"),
-            $request->request->get("password"),
+        $updateResult = $app['db']->executeUpdate($updateMessageQuery, array(
+            $request->request->get("title"),
+            $request->request->get("body"),
             $id
         ));
 
@@ -175,9 +191,9 @@ class UserController implements ControllerProviderInterface
      * @param $id - User id
      * @return \Symfony\Component\HttpFoundation\JsonResponse
      */
-    public function patch(Application $app, Request $request, $id)
+    public function patch(Application $app, Request $request, $id, $user_id)
     {
-        return $this->update($app, $request, $id, true);
+        return $this->update($app, $request, $id, $user_id, true);
     }
 
     /**
@@ -191,17 +207,21 @@ class UserController implements ControllerProviderInterface
 
     /**
      * @param Application $app
-     * @param $id - User id
+     * @param $user_id - User id
+     * @param $id - Message id
      * @return \Symfony\Component\HttpFoundation\JsonResponse
      */
-    public function delete(Application $app, $id)
+    public function delete(Application $app, $id, $user_id)
     {
-        $user = $this->getUserById($id, $app);
+        if (!$this->getUserById($user_id, $app)) {
+            return $app->json('Not found', 404);
+        }
+        $message = $this->getMessageByUserAndMessageId($user_id, $id, $app);
 
-        if (!$user) {
+        if (!$message) {
             return $app->json(array('status' => 'fail', 'errors' => 'Not found'), 404);
         }
-        $deleteResult = $app['db']->delete('users', array('id' => $id));
+        $deleteResult = $app['db']->delete('messages', array('id' => $id));
 
         if (!$deleteResult) {
             return $app->json(array('response' => 'fail', 'errors' => 'Conflict'), 409);
@@ -214,49 +234,39 @@ class UserController implements ControllerProviderInterface
     }
 
     /**
-     * @param $user
+     * @param $message - Message
      * @param Application $app
      * @param bool|false $ignoreBlank - ignoring empty field validation to realize patch request
      * @return mixed
      */
-    private function validate($user, Application $app, $ignoreBlank = false)
+    private function validate($message, Application $app, $ignoreBlank = false)
     {
-        $nameValidation = array();
-        $emailValidation = array();
-        $passwordValidation = array();
+        $titleValidation = array();
+        $contentValidation = array();
         $constraintArray = array();
 
-        if (isset($user['name'])) {
-            $nameValidation[] = new Assert\Length(array('min' => 2));
+        if (isset($message['title'])) {
+            $titleValidation[] = new Assert\Length(array('min' => 2));
         }
 
-        if (isset($user['email'])) {
-            $emailValidation[] = new Assert\Email();
-        }
-
-        if (isset($user['password'])) {
-            $passwordValidation[] = new Assert\Length(array('min' => 6));
+        if (isset($message['body'])) {
+            $contentValidation[] = new Assert\Length(array('min' => 6));
         }
 
         if (!$ignoreBlank) {
-            $nameValidation[] = new Assert\NotBlank();
-            $emailValidation[] = new Assert\NotBlank();
-            $passwordValidation[] = new Assert\NotBlank();
+            $titleValidation[] = new Assert\NotBlank();
+            $contentValidation[] = new Assert\NotBlank();
         }
 
-        if (count($nameValidation) > 0) {
-            $constraintArray['name'] = $nameValidation;
+        if (count($titleValidation) > 0) {
+            $constraintArray['title'] = $titleValidation;
         }
 
-        if (count($emailValidation) > 0) {
-            $constraintArray['email'] = $emailValidation;
-        }
-
-        if (count($passwordValidation) > 0) {
-            $constraintArray['password'] = $passwordValidation;
+        if (count($contentValidation) > 0) {
+            $constraintArray['body'] = $contentValidation;
         }
         $constraint = new Assert\Collection($constraintArray);
-        $errors = $app['validator']->validateValue($user, $constraint);
+        $errors = $app['validator']->validateValue($message, $constraint);
 
         return $errors;
     }
@@ -272,5 +282,19 @@ class UserController implements ControllerProviderInterface
         $user = $app['db']->fetchArray($userQuery, array($id));
 
         return $user;
+    }
+
+    /**
+     * @param $id - User id
+     * @param $app
+     * @return mixed
+     */
+
+    private function getMessageByUserAndMessageId($user_id, $id, $app)
+    {
+        $sql = "SELECT * FROM `messages` WHERE `user_id`=? AND `id`=?";
+        $message = $app['db']->fetchArray($sql, array($user_id, $id));
+
+        return $message;
     }
 }
